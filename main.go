@@ -45,21 +45,7 @@ func main() {
 	nich := make(chan string)
 	cmch := make(chan string)
 	imch := make(chan *[]compute.VirtualMachineImageResource)
-	env := flag.String("Env", "", "please provide environment name.")
-	tier := flag.String("Tier", "", "please provide tier name. only app or web is allowed")
-	oss := flag.String("OS", "", "please provide OS name to be deployed")
-	version := flag.String("version", "", "please provide OS version to be deployed")
-	dsks := flag.String("Disks", "", "please add disks to be added")
-	countTo := flag.String("countTO", "", "Count the number of VMs to be deployed")
-	appcode := flag.String("AppCode", "", "provide three letter app code for the deployment")
-	crq := flag.String("CRQ", "", "provide the CRQ # for the deployment")
-	subscriptionID := flag.String("subscriptionID", "", "please provide subscriptionID")
-	flag.Parse()
-	if *dsks == "" || *oss == "" || *subscriptionID == "" || *env == "" || *countTo == "" || *tier == "" || *version == "" || *appcode == "" || *crq == "" {
-		fmt.Println("\nFollowing Flags are required to proceed")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
+	env, tier, oss, version, dsks, countTo, appcode, crq, subscriptionID := parseFlags()
 	AVsetname := fmt.Sprintf("%s-%s-avs-001", provider, *env)
 	subscription = *subscriptionID
 	ctx := context.Background()
@@ -108,7 +94,7 @@ func main() {
 				go createNIC(ctx, RGname, nic, subscription, region, subnet, nich)
 				go createVM(ctx, RGname, vmname, username, passwd, <-nich, avsnm, region, pubnoffer.publisher, pubnoffer.offer, sknm, igvs, crq, disks, vmch)
 				mx.Unlock()
-				fmt.Printf("VM name: %s Deployed\n", <-vmch)
+				fmt.Printf("VM name: %s Deployed 🎉\n", <-vmch)
 				wg.Done()
 			}(vmname, nicname, &disks)
 		}
@@ -120,7 +106,7 @@ func main() {
 	for {
 		select {
 		case complete := <-cmch:
-			fmt.Printf("deployment completed, %s\n", complete)
+			fmt.Printf("deployment completed 🎉🎉🎉, %s\n", complete)
 			done := time.Since(now)
 			fmt.Printf("Time took: %.2f minutes", done.Minutes())
 			return
@@ -129,6 +115,25 @@ func main() {
 			time.Sleep(time.Millisecond * 1000)
 		}
 	}
+}
+
+func parseFlags() (env, tier, oss, version, dsks, countTo, appcode, crq, subscriptionID *string) {
+	env = flag.String("Env", "", "please provide environment name.")
+	tier = flag.String("Tier", "", "please provide tier name. only app or web is allowed")
+	oss = flag.String("OS", "", "please provide OS name to be deployed")
+	version = flag.String("version", "", "please provide OS version to be deployed")
+	dsks = flag.String("Disks", "", "please add disks to be added")
+	countTo = flag.String("countTO", "", "Count the number of VMs to be deployed")
+	appcode = flag.String("AppCode", "", "provide three letter app code for the deployment")
+	crq = flag.String("CRQ", "", "provide the CRQ # for the deployment")
+	subscriptionID = flag.String("subscriptionID", "", "please provide subscriptionID")
+	flag.Parse()
+	if *dsks == "" || *oss == "" || *subscriptionID == "" || *env == "" || *countTo == "" || *tier == "" || *version == "" || *appcode == "" || *crq == "" {
+		fmt.Println("\nFollowing Flags are required to proceed")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+	return
 }
 
 func getImageVersion(ctx context.Context, pubnoffer OS, os, version string, ch chan *[]compute.VirtualMachineImageResource) (string, string) {
@@ -345,12 +350,10 @@ func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, reg
 	if err != nil {
 		panic(err)
 	}
-	NIC := *inter.NetworkProfile
-	ip, err := (*NIC.NetworkInterfaces)[0].MarshalJSON()
 	if err != nil {
 		panic(err)
 	}
-	ch <- fmt.Sprintf("%s IP: %s", *inter.Name, string(ip))
+	ch <- *inter.Name
 }
 
 func createAVS(ctx context.Context, name, rg, sku, loc string, ch chan string) {
