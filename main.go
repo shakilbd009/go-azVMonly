@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -18,26 +19,17 @@ import (
 )
 
 var (
-	provider = "az"
-	//env          = "prod"
-	//tier         = "app"
+	provider     = "az"
 	region       = "eastus"
 	avSku        = "aligned"
-	publisher    = "Canonical"
-	offer        = "UbuntuServer"
-	vnetcidr     = "10.0.0.0/16"
-	subnetcidr   = "10.0.0.0/24"
 	RGname       = "az-nonProd-rg-001"
 	VnetName     = "az-nonProd-vnet-001"
 	subnetName   = "az-nonProd-sub-001"
 	NSGname      = "az-nonProd-nsg-001"
 	rdesc        = "az-nonProd-rule-001"
 	subscription = ""
-	priority     = 100
 	username     = "usertest"
 	passwd       = "useRword123$"
-	vmname       = "azxeptst01"
-	wsku         = "2016-Datacenter"
 )
 
 //OS publisher,offer
@@ -51,17 +43,20 @@ func main() {
 	avch := make(chan string)
 	sbch := make(chan string)
 	nich := make(chan string)
-	skch := make(chan *[]compute.VirtualMachineImageResource)
+	cmch := make(chan string)
 	imch := make(chan *[]compute.VirtualMachineImageResource)
 	env := flag.String("Env", "", "please provide environment name.")
 	tier := flag.String("Tier", "", "please provide tier name. only app or web is allowed")
 	oss := flag.String("OS", "", "please provide OS name to be deployed")
+	version := flag.String("version", "", "please provide OS version to be deployed")
 	dsks := flag.String("Disks", "", "please add disks to be added")
 	countTo := flag.String("countTO", "", "Count the number of VMs to be deployed")
+	appcode := flag.String("AppCode", "", "provide three letter app code for the deployment")
+	crq := flag.String("CRQ", "", "provide the CRQ # for the deployment")
 	subscriptionID := flag.String("subscriptionID", "", "please provide subscriptionID")
 	flag.Parse()
-	if *dsks == "" || *oss == "" || *subscriptionID == "" || *env == "" || *countTo == "" || *tier == "" {
-		fmt.Println("\nDisks,OS,subscriptionID flags are required")
+	if *dsks == "" || *oss == "" || *subscriptionID == "" || *env == "" || *countTo == "" || *tier == "" || *version == "" || *appcode == "" || *crq == "" {
+		fmt.Println("\nFollowing Flags are required to proceed")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -70,79 +65,76 @@ func main() {
 	ctx := context.Background()
 	pubnoffer, err := getImagePubnOffer(*oss)
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
-	go getSkus(ctx, region, pubnoffer.publisher, pubnoffer.offer, skch)
 	go createAVS(ctx, AVsetname, RGname, avSku, region, avch)
-	skus := *<-skch
-	sknm, igvs := getImageVersion(ctx, skus, pubnoffer, *oss, imch)
+	sknm, igvs := getImageVersion(ctx, pubnoffer, *oss, *version, imch)
 	if sknm == "" || igvs == "" {
-		panic("image version erro")
+		log.Fatalln("image version error")
 	}
 
-	vm := getVMname(*env, *oss, "tst")
+	vm := getVMname(*env, *oss, *appcode)
 	subnetname, err := getSubnetName(*tier, *env)
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	vname, err := getNetwork(*env)
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	go getSubnet(ctx, RGname, subnetname, vname, sbch)
 	subnet := <-sbch
 	avsnm := <-avch
 	count := strings.Split(*countTo, "-")
 	var wg sync.WaitGroup
+	var mx sync.Mutex
 	start, err := strconv.Atoi(count[0])
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	end, err := strconv.Atoi(count[1])
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	vmch := make(chan string, end-start)
-	for i := start; i <= end; i++ {
-		vmname := fmt.Sprintf("%s%02d", vm, i)
-		nicname := fmt.Sprintf("%s-nic-01", vmname)
-		disks := getDisks(dsks, vmname)
-		wg.Add(1)
-		go func(vmname, nic string, disks *[]compute.DataDisk) {
-			go createNIC(ctx, RGname, nic, subscription, region, subnet, nich)
-			go createVM(ctx, RGname, vmname, username, passwd, <-nich, avsnm, region, pubnoffer.publisher, pubnoffer.offer, sknm, igvs, disks, vmch)
-			fmt.Printf("VM name: %s Deployed\n", <-vmch)
-			wg.Done()
-		}(vmname, nicname, &disks)
+	go func(vmch, ch chan string) {
+		for i := start; i <= end; i++ {
+			wg.Add(1)
+			vmname := fmt.Sprintf("%s%02d", vm, i)
+			nicname := fmt.Sprintf("%s-nic-01", vmname)
+			disks := getDisks(dsks, vmname)
+			go func(vmname, nic string, disks *[]compute.DataDisk) {
+				mx.Lock()
+				go createNIC(ctx, RGname, nic, subscription, region, subnet, nich)
+				go createVM(ctx, RGname, vmname, username, passwd, <-nich, avsnm, region, pubnoffer.publisher, pubnoffer.offer, sknm, igvs, crq, disks, vmch)
+				mx.Unlock()
+				fmt.Printf("VM name: %s Deployed\n", <-vmch)
+				wg.Done()
+			}(vmname, nicname, &disks)
+		}
+		wg.Wait()
+		close(vmch)
+		ch <- "Done"
+	}(vmch, cmch)
+
+	for {
+		select {
+		case complete := <-cmch:
+			fmt.Printf("deployment completed, %s\n", complete)
+			done := time.Since(now)
+			fmt.Printf("Time took: %.2f minutes", done.Minutes())
+			return
+		default:
+			log.Println("Deploying VM...")
+			time.Sleep(time.Millisecond * 1000)
+		}
 	}
-	wg.Wait()
-	close(vmch)
-	done := time.Since(now)
-	fmt.Printf("Time took: %.2f minutes", done.Minutes())
-	// for {
-	// 	time.Sleep(time.Millisecond * 1000)
-	// 	select {
-	// 	case vm := <-vmch:
-	// 		fmt.Printf("VM deployed, VM name: %s\n", vm)
-	// 		return
-	// 	default:
-	// 		log.Println("Deploying VM...")
-	// 	}
-	// }
 }
 
-func getImageVersion(ctx context.Context, skus []compute.VirtualMachineImageResource, pubnoffer OS, os string, ch chan *[]compute.VirtualMachineImageResource) (string, string) {
-	for _, v := range skus[len(skus)-1:] {
-		winos := strings.TrimSpace(os)
-		winos = strings.ToLower(winos)
-		if winos == "windows" {
-			go getVMimages(ctx, region, pubnoffer.publisher, pubnoffer.offer, wsku, ch)
-			return wsku, *(*<-ch)[0].Name
-		}
-		go getVMimages(ctx, region, pubnoffer.publisher, pubnoffer.offer, *v.Name, ch)
-		return *v.Name, *(*<-ch)[0].Name
-	}
-	return "", ""
+func getImageVersion(ctx context.Context, pubnoffer OS, os, version string, ch chan *[]compute.VirtualMachineImageResource) (string, string) {
+	go getVMimages(ctx, region, pubnoffer.publisher, pubnoffer.offer, version, ch)
+	versn := (*<-ch)
+	return version, *versn[len(versn)-1].Name
 }
 
 func getSkus(ctx context.Context, region, publisher, offer string, ch chan *[]compute.VirtualMachineImageResource) {
@@ -294,7 +286,7 @@ func vmClient() compute.VirtualMachinesClient {
 	return vmClient
 }
 
-func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, region, publisher, offer, sku, version string, datadisks *[]compute.DataDisk, ch chan string) {
+func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, region, publisher, offer, sku, version string, crq *string, datadisks *[]compute.DataDisk, ch chan string) {
 	client := vmClient()
 	defer errRecover()
 	resp, err := client.CreateOrUpdate(ctx,
@@ -339,6 +331,7 @@ func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, reg
 					ID: to.StringPtr(avsID),
 				},
 			},
+			Tags: map[string]*string{"CRQ": crq},
 		},
 	)
 	if err != nil {
@@ -352,7 +345,12 @@ func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, reg
 	if err != nil {
 		panic(err)
 	}
-	ch <- *inter.Name
+	NIC := *inter.NetworkProfile
+	ip, err := (*NIC.NetworkInterfaces)[0].MarshalJSON()
+	if err != nil {
+		panic(err)
+	}
+	ch <- fmt.Sprintf("%s IP: %s", *inter.Name, string(ip))
 }
 
 func createAVS(ctx context.Context, name, rg, sku, loc string, ch chan string) {
