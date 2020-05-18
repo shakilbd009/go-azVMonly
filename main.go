@@ -272,6 +272,7 @@ func createNIC(ctx context.Context, rg, nicname, subscription, loc, subid string
 						},
 					},
 				},
+				EnableAcceleratedNetworking: to.BoolPtr(true),
 			},
 		},
 	)
