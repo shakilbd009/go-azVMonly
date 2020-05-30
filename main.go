@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,18 @@ type OS struct {
 	offer     string
 }
 
+type deployment struct {
+	Env            string
+	Tier           string
+	Os             string
+	Version        string
+	Disks          string
+	Count          string
+	AppCode        string
+	CRQ            string
+	SubscriptionID string
+}
+
 func main() {
 	now := time.Now()
 	avch := make(chan string)
@@ -45,33 +58,37 @@ func main() {
 	nich := make(chan string)
 	cmch := make(chan string)
 	imch := make(chan *[]compute.VirtualMachineImageResource)
-	env, tier, oss, version, dsks, countTo, appcode, crq, subscriptionID := parseFlags()
-	AVsetname := fmt.Sprintf("%s-%s-avs-001", provider, *env)
-	subscription = *subscriptionID
+	dploy := new(deployment)
+	if err := dploy.parseFlags(); err != nil {
+		log.Fatalln(err)
+	}
+	//env, tierdploy.Os, version, dsks, countTo, appcode, crq, subscriptionID := parseFlags()
+	AVsetname := fmt.Sprintf("%s-%s-avs-001", provider, dploy.Env)
+	subscription = dploy.SubscriptionID
 	ctx := context.Background()
-	pubnoffer, err := getImagePubnOffer(*oss)
+	pubnoffer, err := getImagePubnOffer(dploy.Os)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	go createAVS(ctx, AVsetname, RGname, avSku, region, avch)
-	sknm, igvs := getImageVersion(ctx, pubnoffer, *oss, *version, imch)
+	sknm, igvs := getImageVersion(ctx, pubnoffer, dploy.Os, dploy.Version, imch)
 	if sknm == "" || igvs == "" {
 		log.Fatalln("image version error")
 	}
 
-	vm := getVMname(*env, *oss, *appcode)
-	subnetname, err := getSubnetName(*tier, *env)
+	vm := getVMname(dploy.Env, dploy.Os, dploy.AppCode)
+	subnetname, err := getSubnetName(dploy.Tier, dploy.Env)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	vname, err := getNetwork(*env)
+	vname, err := getNetwork(dploy.Env)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	go getSubnet(ctx, RGname, subnetname, vname, sbch)
 	subnet := <-sbch
 	avsnm := <-avch
-	count := strings.Split(*countTo, "-")
+	count := strings.Split(dploy.Count, "-")
 	var wg sync.WaitGroup
 	var mx sync.Mutex
 	start, err := strconv.Atoi(count[0])
@@ -88,11 +105,11 @@ func main() {
 			wg.Add(1)
 			vmname := fmt.Sprintf("%s%02d", vm, i)
 			nicname := fmt.Sprintf("%s-nic-01", vmname)
-			disks := getDisks(dsks, vmname)
+			disks := getDisks(&dploy.Disks, vmname)
 			go func(vmname, nic string, disks *[]compute.DataDisk) {
 				mx.Lock()
 				go createNIC(ctx, RGname, nic, subscription, region, subnet, nich)
-				go createVM(ctx, RGname, vmname, username, passwd, <-nich, avsnm, region, pubnoffer.publisher, pubnoffer.offer, sknm, igvs, crq, disks, vmch)
+				go createVM(ctx, RGname, vmname, username, passwd, <-nich, avsnm, region, pubnoffer.publisher, pubnoffer.offer, sknm, igvs, &dploy.CRQ, disks, vmch)
 				mx.Unlock()
 				fmt.Printf("VM name: %s Deployed 🎉\n", <-vmch)
 				wg.Done()
@@ -117,23 +134,35 @@ func main() {
 	}
 }
 
-func parseFlags() (env, tier, oss, version, dsks, countTo, appcode, crq, subscriptionID *string) {
-	env = flag.String("Env", "", "please provide environment name.")
-	tier = flag.String("Tier", "", "please provide tier name. only app or web is allowed")
-	oss = flag.String("OS", "", "please provide OS name to be deployed")
-	version = flag.String("version", "", "please provide OS version to be deployed")
-	dsks = flag.String("Disks", "", "please add disks to be added")
-	countTo = flag.String("countTO", "", "Count the number of VMs to be deployed")
-	appcode = flag.String("AppCode", "", "provide three letter app code for the deployment")
-	crq = flag.String("CRQ", "", "provide the CRQ # for the deployment")
-	subscriptionID = flag.String("subscriptionID", "", "please provide subscriptionID")
+func (d *deployment) parseFlags() error {
+	flag.StringVar(&d.Env, "Env", "", "please provide environment name.")
+	flag.StringVar(&d.Tier, "Tier", "", "please provdploy.Tier name. only app or web is allowed")
+	flag.StringVar(&d.Os, "OS", "", "please provide OS name to be deployed")
+	flag.StringVar(&d.Version, "version", "", "please provide OS version to be deployed")
+	flag.StringVar(&d.Disks, "Disks", "", "please add disks to be added")
+	flag.StringVar(&d.Count, "countTO", "", "Count the number of VMs to be deployed")
+	flag.StringVar(&d.AppCode, "AppCode", "", "provide three letter app code for the deployment")
+	flag.StringVar(&d.CRQ, "CRQ", "", "provide the CRQ # for the deployment")
+	flag.StringVar(&d.SubscriptionID, "subscriptionID", "", "please provide subscriptionID")
 	flag.Parse()
-	if *dsks == "" || *oss == "" || *subscriptionID == "" || *env == "" || *countTo == "" || *tier == "" || *version == "" || *appcode == "" || *crq == "" {
+	if d.Disks == "" || d.Os == "" || d.SubscriptionID == "" || d.Env == "" || d.Count == "" || d.Tier == "" || d.Version == "" || d.AppCode == "" || d.CRQ == "" {
 		fmt.Println("\nFollowing Flags are required to proceed")
 		flag.PrintDefaults()
-		os.Exit(1)
+		return errors.New("Provide all the mandatory flags mentioned above")
 	}
-	return
+	return nil
+}
+
+//in-progress
+func (d *deployment) toLower() {
+
+	value := reflect.ValueOf(*d)
+	for i := 0; i < value.NumField(); i++ {
+		if v, ok := value.Field(i).Interface().(string); ok {
+			v = strings.ToLower(v)
+		}
+	}
+
 }
 
 func getImageVersion(ctx context.Context, pubnoffer OS, os, version string, ch chan *[]compute.VirtualMachineImageResource) (string, string) {
