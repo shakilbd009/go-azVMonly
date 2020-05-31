@@ -135,6 +135,7 @@ func main() {
 }
 
 func (d *deployment) parseFlags() error {
+
 	flag.StringVar(&d.Env, "Env", "", "please provide environment name.")
 	flag.StringVar(&d.Tier, "Tier", "", "please provdploy.Tier name. only app or web is allowed")
 	flag.StringVar(&d.Os, "OS", "", "please provide OS name to be deployed")
@@ -166,12 +167,14 @@ func (d *deployment) toLower() {
 }
 
 func getImageVersion(ctx context.Context, pubnoffer OS, os, version string, ch chan *[]compute.VirtualMachineImageResource) (string, string) {
+
 	go getVMimages(ctx, region, pubnoffer.publisher, pubnoffer.offer, version, ch)
 	versn := (*<-ch)
 	return version, *versn[len(versn)-1].Name
 }
 
 func getSkus(ctx context.Context, region, publisher, offer string, ch chan *[]compute.VirtualMachineImageResource) {
+
 	client := compute.NewVirtualMachineImagesClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -187,6 +190,7 @@ func getSkus(ctx context.Context, region, publisher, offer string, ch chan *[]co
 }
 
 func getVMname(envname, os, app string) string {
+
 	env := strings.ToLower(envname)
 	os = strings.ToLower(os)
 	b := "b"
@@ -195,7 +199,9 @@ func getVMname(envname, os, app string) string {
 	w := "w"
 	x := "x"
 	s := "s"
+
 	switch {
+
 	case env == "base" && os == "windows":
 		return fmt.Sprintf("az%s%sw%s%s", b, w, d, app)
 	case env == "base" && os == "redhat":
@@ -219,6 +225,7 @@ func getVMname(envname, os, app string) string {
 }
 
 func getDisks(disklist *string, vmname string) []compute.DataDisk {
+
 	sizes := strings.Split(*disklist, ",")
 	disks := make([]compute.DataDisk, 0)
 	for i, v := range sizes {
@@ -241,6 +248,7 @@ func getDisks(disklist *string, vmname string) []compute.DataDisk {
 }
 
 func getImagePubnOffer(name string) (os OS, e error) {
+
 	windows := []string{"MicrosoftWindowsServer", "WindowsServer"}
 	redhat := []string{"RedHat", "RHEL"}
 	suse := []string{"SUSE", "SLES"}
@@ -264,6 +272,7 @@ func getImagePubnOffer(name string) (os OS, e error) {
 }
 
 func getAVS(ctx context.Context, rg, name string) (string, error) {
+
 	client := compute.NewAvailabilitySetsClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -277,6 +286,7 @@ func getAVS(ctx context.Context, rg, name string) (string, error) {
 }
 
 func createNIC(ctx context.Context, rg, nicname, subscription, loc, subid string, ch chan string) {
+
 	client := network.NewInterfacesClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -313,6 +323,7 @@ func createNIC(ctx context.Context, rg, nicname, subscription, loc, subid string
 }
 
 func vmClient() compute.VirtualMachinesClient {
+
 	vmClient := compute.NewVirtualMachinesClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -322,6 +333,7 @@ func vmClient() compute.VirtualMachinesClient {
 }
 
 func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, region, publisher, offer, sku, version string, crq *string, datadisks *[]compute.DataDisk, ch chan string) {
+
 	client := vmClient()
 	defer errRecover()
 	resp, err := client.CreateOrUpdate(ctx,
@@ -387,6 +399,7 @@ func createVM(ctx context.Context, rg, vmname, username, passwd, nic, avsID, reg
 }
 
 func createAVS(ctx context.Context, name, rg, sku, loc string, ch chan string) {
+
 	client := compute.NewAvailabilitySetsClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -416,6 +429,7 @@ func createAVS(ctx context.Context, name, rg, sku, loc string, ch chan string) {
 }
 
 func getVMimages(ctx context.Context, region, publisher, offer, skus string, ch chan *[]compute.VirtualMachineImageResource) {
+
 	client := compute.NewVirtualMachineImagesClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	if err == nil {
@@ -431,6 +445,7 @@ func getVMimages(ctx context.Context, region, publisher, offer, skus string, ch 
 }
 
 func getSubnetName(tier, envname string) (string, error) {
+
 	baseAppSub := []string{"az-base-sub-001", "az-base-app-sub-002"}
 	ProdAppSub := []string{"az-Prod-sub-001", "az-Prod-app-sub-002"}
 	nonProdAppSub := []string{"az-nonProd-sub-001", "az-nonProd-app-sub-002"}
@@ -455,6 +470,7 @@ func getSubnetName(tier, envname string) (string, error) {
 }
 
 func getNetwork(envname string) (string, error) {
+
 	network := []string{"az-base-vnet-001", "az-nonProd-vnet-001", "az-Prod-vnet-001"}
 	envname = strings.ToLower(envname)
 	switch {
@@ -470,6 +486,7 @@ func getNetwork(envname string) (string, error) {
 }
 
 func getSubnet(ctx context.Context, rg, sname, vname string, ch chan string) {
+
 	client := network.NewSubnetsClient(subscription)
 	authorizer, err := auth.NewAuthorizerFromCLI()
 	defer errRecover()
